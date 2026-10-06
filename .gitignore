@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+.dart_tool/
+build/
+.idea/
+.vscode/
+data/reports/*.html
+
+# local tooling
+.DS_Store
+frontend/pubspec.lock
+data/*
+!data/.gitkeep
+frontend/.flutter-plugins-dependencies

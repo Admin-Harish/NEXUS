@@ -1,0 +1,1 @@
+A storage admin provisions a 100 GB volume called "analytics", grows it to 250 GB, confirms that trying to shrink it back to 100 GB is refused, checks that total capacity in the stats is 250 GB, then deletes the volume and confirms it is gone.

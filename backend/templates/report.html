@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NEXUS Test Report – {{ run.target.name }}</title>
+  <style>
+    body { font-family: Inter, Arial, sans-serif; margin: 0; padding: 40px 16px; color: #172033; background: #f6f8fb; }
+    .wrap { max-width: 1080px; margin: 0 auto; }
+    .card { background: white; border: 1px solid #dfe5ef; border-radius: 14px; padding: 22px; margin: 18px 0; box-shadow: 0 4px 16px #17203312; overflow-x: auto; }
+    .metrics { display: flex; flex-wrap: wrap; gap: 28px; }
+    .label { color: #667085; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .value { font-size: 28px; font-weight: 700; }
+    .passed, .done { color: #14804a; } .failed, .error { color: #c0392b; } .skipped, .pending { color: #9a6700; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    .badge.passed { background: #e7f6ee; } .badge.failed, .badge.error { background: #fdecea; } .badge.skipped { background: #fff6dd; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; } th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e8edf4; vertical-align: top; }
+    th { color: #667085; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    code { background: #f0f3f7; padding: 2px 5px; border-radius: 5px; font-size: 13px; }
+    pre { background: #f6f8fb; padding: 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; font-size: 12px; margin: 6px 0 0; max-height: 220px; overflow: auto; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; } dt { color: #667085; } dd { margin: 0; word-break: break-all; }
+    details summary { cursor: pointer; color: #2457d6; font-size: 13px; }
+  </style>
+</head>
+<body><div class="wrap">
+  <h1>NEXUS Test Report</h1>
+  <p>{{ run.target.name }} · Run <code>{{ run.id }}</code></p>
+  {% set passed = run.results|selectattr('status', 'equalto', 'passed')|list|length %}
+  {% set failed = run.results|selectattr('status', 'equalto', 'failed')|list|length %}
+  <div class="card metrics">
+    <div><div class="label">Overall</div><div class="value {{ run.status }}">{{ run.status|upper }}</div></div>
+    <div><div class="label">Passed</div><div class="value passed">{{ passed }}</div></div>
+    <div><div class="label">Failed</div><div class="value failed">{{ failed }}</div></div>
+    <div><div class="label">Total</div><div class="value">{{ run.results|length }}</div></div>
+  </div>
+  {% if run.error %}<div class="card"><h2 class="error">Run error</h2><pre>{{ run.error }}</pre></div>{% endif %}
+  <div class="card">
+    <h2>Deployment</h2>
+    <dl>
+      <dt>Repository</dt><dd>{{ run.target.source }}</dd>
+      <dt>Test mode</dt><dd>{{ {'discover': 'Discovered from the repository', 'scenario': 'Custom scenario', 'excel': 'Spreadsheet test cases'}.get(run.mode, run.mode) }}</dd>
+      {% if run.scenario %}<dt>Scenario</dt><dd>{{ run.scenario }}</dd>{% endif %}
+      {% if run.target.commit %}<dt>Commit</dt><dd><code>{{ run.target.commit }}</code></dd>{% endif %}
+      {% if run.target.image %}<dt>Image</dt><dd><code>{{ run.target.image }}</code></dd>{% endif %}
+      {% if run.target.url %}<dt>Tested at</dt><dd><code>{{ run.target.url }}</code></dd>{% endif %}
+      <dt>Started</dt><dd>{{ run.started_at }}</dd>
+      <dt>Completed</dt><dd>{{ run.completed_at }}</dd>
+    </dl>
+    <h3>Stages</h3>
+    <table><tr><th>Stage</th><th>Status</th><th>Detail</th></tr>
+      {% for s in run.stages if s.key not in ('report', 'email') %}<tr><td>{{ s.label }}</td><td class="{{ s.status }}">{{ s.status }}</td><td>{{ s.detail }}</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>Test results</h2>
+    <table><tr><th>#</th><th>Test</th><th>Source</th><th>Request</th><th>Expected</th><th>Actual</th><th>Status</th></tr>
+      {% for r in run.results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ r.test_name }}
+          <details><summary>Evidence</summary>{% if r.payload %}<pre>Request body: {{ r.payload|tojson }}</pre>{% endif %}<pre>{{ r.response_excerpt or r.error or r.reason }}</pre></details></td>
+        {% set src = (run.cases[loop.index0].source if run.cases and loop.index0 < run.cases|length else 'discovered') %}
+        <td>{{ {'excel': 'Your sheet' ~ (' #' ~ run.cases[loop.index0].excel_ref if run.cases[loop.index0].excel_ref else ''), 'suggested': 'Added by NEXUS', 'scenario': 'Scenario', 'discovered': 'Discovered'}.get(src, src) }}</td>
+        <td><code>{{ r.method }} {{ r.path }}</code></td>
+        <td>HTTP {{ r.expected_status }}{% if r.expected_contains %}<br>contains “{{ r.expected_contains }}”{% endif %}</td>
+        <td>{% if r.actual_status %}HTTP {{ r.actual_status }}{% else %}–{% endif %}{% if r.duration_ms is defined %}<br><span style="color:#667085">{{ r.duration_ms }} ms</span>{% endif %}</td>
+        <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>Failure analysis</h2>
+    {% if run.analysis %}
+      {% for item in run.analysis %}
+      <h3>{{ item.test_name }} <span class="badge failed">{{ item.severity }}</span></h3>
+      <p><b>Root cause:</b> {{ item.root_cause }}</p>
+      <p><b>Suggested action:</b> {{ item.suggested_action }}</p>
+      {% if item.evidence %}<p><b>Evidence:</b> {{ item.evidence|join('; ') if item.evidence is iterable and item.evidence is not string else item.evidence }}</p>{% endif %}
+      {% endfor %}
+    {% else %}<p>No failures were observed.</p>{% endif %}
+  </div>
+  {% if run.target.service_log %}<div class="card"><h2>Service log (last 50 lines)</h2><pre>{{ run.target.service_log }}</pre></div>{% endif %}
+</div></body>
+</html>

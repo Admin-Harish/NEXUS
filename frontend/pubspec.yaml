@@ -1,0 +1,17 @@
+name: nexus_frontend
+description: NEXUS Flutter web frontend.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  file_picker: ^8.1.4
+  web: ^1.1.0
+
+flutter:
+  uses-material-design: true

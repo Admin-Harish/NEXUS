@@ -1,0 +1,1 @@
+A warehouse clerk receives 40 "USB-C cables", sells all of them so the item goes out of stock, and makes sure a negative quantity can never be saved. Finally the clerk removes the item and checks that searching for "usb" returns nothing.
