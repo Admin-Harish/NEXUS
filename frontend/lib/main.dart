@@ -40,6 +40,8 @@ const stageLabels = {
 
 enum Mode { discover, scenario, excel }
 
+enum Framework { pytest, robot }
+
 const sampleRepos = {
   'Project1 · Volume API': 'https://github.com/Admin-Harish/Project1.git',
   'Project2 · Inventory API': 'https://github.com/Admin-Harish/Project2.git',
@@ -54,10 +56,13 @@ class NexusHome extends StatefulWidget {
 class _NexusHomeState extends State<NexusHome> {
   final repoUrl = TextEditingController();
   final scenario = TextEditingController();
-  final email = TextEditingController();
   Mode mode = Mode.discover;
+  Framework framework = Framework.pytest;
+  final copyTo = TextEditingController();
   PlatformFile? excelFile;
   Set<String> selected = {};
+  String? copyMessage;
+  bool copySent = false;
 
   Stage stage = Stage.input;
   String analyzeStatus = '';
@@ -91,6 +96,7 @@ class _NexusHomeState extends State<NexusHome> {
   Future<Map<String, dynamic>> uploadExcel(PlatformFile file) async {
     final request = http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/api/projects/ingest-excel'));
     request.fields['url'] = repoUrl.text.trim();
+    request.fields['framework'] = framework.name;
     request.files.add(http.MultipartFile.fromBytes('file', file.bytes as Uint8List, filename: file.name));
     final response = await request.send();
     final body = jsonDecode(await response.stream.bytesToString());
@@ -118,7 +124,7 @@ class _NexusHomeState extends State<NexusHome> {
     try {
       final p = mode == Mode.excel
           ? await uploadExcel(excelFile!)
-          : await api('POST', '/api/projects/ingest', {'url': repoUrl.text.trim(), 'scenario': mode == Mode.scenario ? scenario.text.trim() : ''});
+          : await api('POST', '/api/projects/ingest', {'url': repoUrl.text.trim(), 'scenario': mode == Mode.scenario ? scenario.text.trim() : '', 'framework': framework.name});
       if (mySession != session) return;
       setState(() {
         project = Map<String, dynamic>.from(p);
@@ -149,7 +155,7 @@ class _NexusHomeState extends State<NexusHome> {
     setState(() => busy = true);
     try {
       await api('POST', '/api/plans/${plan!['id']}/approve', {'approved': true, 'comment': 'Approved in NEXUS UI', 'selected_ids': selected.toList()});
-      final started = await api('POST', '/api/runs', {'plan_id': plan!['id'], 'to_email': email.text.trim().isEmpty ? null : email.text.trim()});
+      final started = await api('POST', '/api/runs', {'plan_id': plan!['id']});
       if (mySession != session) return;
       setState(() {
         run = Map<String, dynamic>.from(started);
@@ -199,6 +205,7 @@ class _NexusHomeState extends State<NexusHome> {
       run = null;
       error = null;
       busy = false;
+      copyMessage = null;
     });
   }
 
@@ -208,6 +215,7 @@ class _NexusHomeState extends State<NexusHome> {
   }
 
   Future<void> downloadReport() => download('report', 'text/html', 'nexus-report', 'html');
+  Future<void> downloadSuite() => download('testsuite', 'application/zip', 'nexus-testsuite', 'zip');
   Future<void> downloadExcel() => download('excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'nexus-testcases', 'xlsx');
 
   Future<void> download(String endpoint, String type, String prefix, String extension) async {
@@ -235,9 +243,13 @@ class _NexusHomeState extends State<NexusHome> {
   Future<void> resendEmail() async {
     setState(() => busy = true);
     try {
-      final result = await api('POST', '/api/runs/${run!['id']}/email', {'to_email': email.text.trim().isEmpty ? null : email.text.trim()});
+      final result = await api('POST', '/api/runs/${run!['id']}/email', {'to_email': copyTo.text.trim()});
       _snack(result['message']);
-      setState(() => run!['email'] = {'sent': result['sent'], 'message': result['message']});
+      setState(() {
+        copyMessage = result['message'];
+        copySent = result['sent'] == true;
+        if (copySent) copyTo.clear();
+      });
     } catch (e) {
       _snack(_clean(e));
     }
@@ -399,16 +411,23 @@ class _NexusHomeState extends State<NexusHome> {
               modeHint(Icons.playlist_add_check, 'Each row becomes a test case. Columns like ID, Test case, Method, Path, Body, Expected status are used directly; plain-English rows are interpreted by GPT. NEXUS also suggests cases your sheet is missing, and you choose which to add.'),
             ]),
         },
-        const SizedBox(height: 18),
-        TextField(
-          controller: email,
-          decoration: const InputDecoration(
-            labelText: 'Email report to (optional)',
-            hintText: 'Defaults to the configured recipient',
-            prefixIcon: Icon(Icons.mail_outline),
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
+        const SizedBox(height: 24),
+        Text('Test framework', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 10),
+        SegmentedButton<Framework>(
+          segments: const [
+            ButtonSegment(value: Framework.pytest, icon: Icon(Icons.code), label: Text('pytest')),
+            ButtonSegment(value: Framework.robot, icon: Icon(Icons.smart_toy_outlined), label: Text('Robot Framework')),
+          ],
+          selected: {framework},
+          onSelectionChanged: (s) => setState(() => framework = s.first),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          framework == Framework.pytest
+              ? 'NEXUS writes a pytest + requests suite from the approved test cases and runs it against the deployed container.'
+              : 'NEXUS writes a Robot Framework suite (RequestsLibrary) from the approved test cases and runs it against the deployed container.',
+          style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
         ),
         const SizedBox(height: 24),
         FilledButton.icon(
@@ -485,6 +504,10 @@ class _NexusHomeState extends State<NexusHome> {
             Icon(Icons.flag_outlined, size: 16, color: brand),
             const SizedBox(width: 6),
             Text(modeLabel, style: const TextStyle(fontWeight: FontWeight.w600, color: brand)),
+            const SizedBox(width: 16),
+            Icon(Icons.code, size: 16, color: Colors.grey.shade700),
+            const SizedBox(width: 6),
+            Text(p['framework'] == 'robot' ? 'Robot Framework suite' : 'pytest suite', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
           ]),
           if ((p['scenario'] ?? '').toString().isNotEmpty)
             Container(
@@ -758,13 +781,45 @@ class _NexusHomeState extends State<NexusHome> {
           const SizedBox(height: 22),
           Wrap(spacing: 12, runSpacing: 12, children: [
             FilledButton.icon(onPressed: r['report_url'] == null ? null : downloadReport, icon: const Icon(Icons.download), label: const Text('Download report')),
+            FilledButton.tonalIcon(onPressed: (r['suite']?['zip']) == null ? null : downloadSuite, icon: const Icon(Icons.folder_zip_outlined), label: const Text('Download test suite')),
             OutlinedButton.icon(onPressed: r['report_url'] == null ? null : downloadExcel, icon: const Icon(Icons.table_view_outlined), label: const Text('Download Excel')),
             OutlinedButton.icon(onPressed: r['report_url'] == null ? null : openReport, icon: const Icon(Icons.open_in_new), label: const Text('Open report')),
-            OutlinedButton.icon(onPressed: busy ? null : resendEmail, icon: const Icon(Icons.forward_to_inbox), label: const Text('Email again')),
             TextButton.icon(onPressed: goHome, icon: const Icon(Icons.home_outlined), label: const Text('Back to home')),
           ]),
+          const SizedBox(height: 22),
+          const Divider(height: 1),
+          const SizedBox(height: 18),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: TextField(
+                controller: copyTo,
+                onChanged: (_) => setState(() {}),
+                onSubmitted: (_) => copyTo.text.trim().isEmpty || busy ? null : resendEmail(),
+                decoration: const InputDecoration(
+                  labelText: 'Email report copy to (optional)',
+                  hintText: 'name@purestorage.com, another@purestorage.com',
+                  helperText: 'Sends the HTML report, Excel results and test suite zip',
+                  prefixIcon: Icon(Icons.forward_to_inbox),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: copyTo.text.trim().isEmpty || busy ? null : resendEmail,
+              icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.send),
+              label: const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text('Send copy')),
+            ),
+          ]),
+          if (copyMessage != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(copyMessage!, style: TextStyle(color: copySent ? okColor : badColor, fontSize: 13)),
+            ),
         ]),
       ),
+      if ((r['suite']?['name']) != null) suiteCard(r['suite'] as Map),
       card(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Results', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
@@ -790,6 +845,41 @@ class _NexusHomeState extends State<NexusHome> {
           ]),
         ),
     ]);
+  }
+
+  Widget suiteCard(Map suite) {
+    final robot = suite['framework'] == 'robot';
+    return card(
+      padding: const EdgeInsets.all(0),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+          childrenPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          leading: Icon(robot ? Icons.smart_toy_outlined : Icons.code, color: brand),
+          title: Text('Generated ${robot ? 'Robot Framework' : 'pytest'} suite', style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: SelectableText('generated_testsuites/${suite['name']}', style: TextStyle(fontFamily: 'monospace', fontSize: 12.5, color: Colors.grey.shade700)),
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final f in (suite['files'] as List? ?? [])) Chip(label: Text('$f', style: const TextStyle(fontFamily: 'monospace', fontSize: 12)), visualDensity: VisualDensity.compact),
+              ]),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxHeight: 420),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: const Color(0xff101828), borderRadius: BorderRadius.circular(8)),
+              child: SingleChildScrollView(
+                child: SelectableText('${suite['source'] ?? ''}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Color(0xffd0d5dd), height: 1.45)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget metric(String label, String value, Color? colour) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 
 
 TestMode = Literal["discover", "scenario", "excel"]
+Framework = Literal["pytest", "robot"]
 
 
 class ProjectSpec(BaseModel):
@@ -10,6 +11,7 @@ class ProjectSpec(BaseModel):
     id: str
     source_type: Literal["repo"] = "repo"
     mode: TestMode = "discover"
+    framework: Framework = "pytest"
     title: str
     summary: str
     detected_stack: list[str] = Field(default_factory=list)
@@ -25,6 +27,7 @@ class ProjectSpec(BaseModel):
 class IngestRequest(BaseModel):
     url: str
     scenario: str = ""
+    framework: Framework = "pytest"
 
 
 class PlanRequest(BaseModel):
@@ -98,3 +101,5 @@ class RunResult(BaseModel):
     cases: list[dict[str, Any]] = Field(default_factory=list)
     mode: str = "discover"
     scenario: str = ""
+    framework: str = "pytest"
+    suite: dict[str, Any] = Field(default_factory=dict)

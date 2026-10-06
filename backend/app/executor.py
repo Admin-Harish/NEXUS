@@ -1,10 +1,13 @@
+"""Runs a generated pytest / Robot Framework suite and streams its results into the run."""
 import asyncio
+import json
+import os
 from datetime import datetime, timezone
-from typing import Any
-import httpx
-from .llm import llm
+from pathlib import Path
+from typing import Any, Callable
 
-BODY_METHODS = {"POST", "PUT", "PATCH"}
+from . import generator
+from .llm import llm
 
 
 def now():
@@ -30,36 +33,67 @@ def _analysis(case: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     return {**fallback, **ai, "test_name": case.get("name")}
 
 
-async def execute_plan(plan: dict[str, Any], base_url: str, run: dict[str, Any]) -> None:
-    """Run each test case in order against base_url, appending to run["results"] as each one finishes."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=20) as client:
-        for case in plan.get("test_cases", []):
-            if case.get("adapter") != "api":
-                run["results"].append({"test_name": case.get("name"), "status": "skipped", "reason": "Adapter is not enabled in this MVP.", "timestamp": now()})
-                continue
-            method = case.get("method", "GET").upper()
-            path = case.get("path", "/health")
-            run["current_test"] = case.get("name")
-            payload = case.get("payload") if method in BODY_METHODS else None
-            started = datetime.now(timezone.utc)
-            try:
-                response = await client.request(method, path, json=payload)
-                body = response.text
-                passed = response.status_code == int(case.get("expected_status", 200))
-                expected_contains = case.get("expected_contains")
-                if expected_contains and str(expected_contains) not in body:
-                    passed = False
-                result = {
-                    "test_name": case.get("name"), "adapter": "api", "method": method,
-                    "path": path, "payload": payload, "status": "passed" if passed else "failed",
-                    "actual_status": response.status_code, "expected_status": case.get("expected_status", 200),
-                    "expected_contains": expected_contains, "response_excerpt": body[:1000],
-                    "duration_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000), "timestamp": now(),
-                }
-                run["results"].append(result)
-                if not passed:
-                    run["analysis"].append(await asyncio.to_thread(_analysis, case, result))
-            except Exception as exc:
-                run["results"].append({"test_name": case.get("name"), "adapter": "api", "method": method, "path": path, "status": "failed", "error": str(exc), "timestamp": now()})
-                run["analysis"].append({"test_name": case.get("name"), "severity": "high", "root_cause": "The test runner could not reach the deployed service.", "evidence": [str(exc)], "suggested_action": "Check the container logs and service connectivity."})
+def _result(case: dict[str, Any], line: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "test_name": case.get("name"), "adapter": "api", "method": case.get("method", "GET").upper(),
+        "path": case.get("path"), "payload": case.get("payload"), "status": line.get("status", "failed"),
+        "actual_status": line.get("actual_status"), "expected_status": case.get("expected_status", 200),
+        "expected_contains": case.get("expected_contains"), "response_excerpt": line.get("response_excerpt") or "",
+        "duration_ms": line.get("duration_ms"), "error": line.get("error"), "timestamp": now(),
+    }
+
+
+async def run_suite(suite: dict[str, Any], cases: list[dict[str, Any]], base_url: str, run: dict[str, Any], log: Callable[[str], None]) -> int:
+    """Execute the suite against base_url. Results are appended to run["results"] as each test finishes."""
+    folder = Path(suite["dir"])
+    results_file = folder / "results" / "nexus_results.jsonl"
+    results_file.unlink(missing_ok=True)
+    cmd = generator.command(suite, base_url)
+    log("$ " + " ".join(cmd))
+    process = await asyncio.create_subprocess_exec(
+        *cmd, cwd=folder, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        env=os.environ | {"BASE_URL": base_url, "NEXUS_RESULTS": str(results_file), "PYTHONUNBUFFERED": "1"},
+    )
+    consumed = 0
+    pending_analysis: list[asyncio.Task] = []
+
+    def drain() -> None:
+        nonlocal consumed
+        if not results_file.exists():
+            return
+        lines = results_file.read_text(encoding="utf-8").splitlines()
+        for raw in lines[consumed:]:
+            line = json.loads(raw)
+            index = line.get("index")
+            case = cases[index] if isinstance(index, int) and 0 <= index < len(cases) else {"name": f"test {index}"}
+            result = _result(case, line)
+            run["results"].append(result)
+            following = len(run["results"])
+            run["current_test"] = cases[following]["name"] if following < len(cases) else None
+            if result["status"] == "failed":
+                pending_analysis.append(asyncio.create_task(asyncio.to_thread(_analysis, case, result)))
+        consumed = len(lines)
+
+    run["current_test"] = cases[0]["name"] if cases else None
+
+    async def pump_output():
+        assert process.stdout
+        async for raw in process.stdout:
+            text = raw.decode(errors="ignore").rstrip()
+            if text and not set(text) <= set("=-. "):
+                log(text[:240])
+
+    reader = asyncio.create_task(pump_output())
+    while process.returncode is None:
+        drain()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=0.5)
+        except asyncio.TimeoutError:
+            pass
+    await reader
+    drain()
     run["current_test"] = None
+    for task in pending_analysis:
+        run["analysis"].append(await task)
+    log(f"{suite['framework']} exited with code {process.returncode}")
+    return process.returncode

@@ -7,16 +7,18 @@ from . import deployer
 from .config import settings
 from .emailer import send_report
 from .excel import export_results
-from .executor import execute_plan
+from . import generator
+from .executor import run_suite
 from .report import REPORT_DIR, render_report
 
 STAGES = [
     ("prepare", "Prepare source"),
+    ("generate", "Generate test suite"),
     ("build", "Build container image"),
     ("start", "Start container"),
     ("test", "Execute test cases"),
     ("cleanup", "Remove containers"),
-    ("report", "Generate report"),
+    ("report", "Generate report & package suite"),
     ("email", "Email report"),
 ]
 
@@ -33,7 +35,7 @@ def new_run(run_id: str, plan: dict[str, Any], project: dict[str, Any]) -> dict[
         "total_tests": len(plan.get("test_cases", [])), "current_test": None,
         "cases": plan.get("test_cases", []), "mode": project.get("mode", "discover"), "scenario": project.get("scenario", ""),
         "stages": [{"key": key, "label": label, "status": "pending", "detail": ""} for key, label in STAGES],
-        "log": [], "email": {},
+        "log": [], "email": {}, "suite": {}, "framework": project.get("framework", "pytest"),
         "target": {"name": project.get("title", "target"), "source": source, "commit": "", "image": "", "container": "", "url": ""},
     }
 
@@ -74,6 +76,14 @@ async def run_pipeline(run: dict[str, Any], plan: dict[str, Any], project: dict[
             stage["detail"] = f"Cloned {project['repo_url']} @ {sha}"
             port = deployer.exposed_port(source_dir) if (source_dir / "Dockerfile").is_file() else 8000
 
+        with _Stage(run, "generate") as stage:
+            run["suite"] = await asyncio.to_thread(
+                generator.write_suite, run["cases"], run["framework"], run["target"]["name"],
+                project["repo_url"], run["target"]["commit"], port)
+            run["suite"]["source"] = generator.read_source(run["suite"])
+            stage["detail"] = f"generated_testsuites/{run['suite']['name']}/{run['suite']['main_file']}"
+            log(f"Wrote {run['framework']} suite with {len(run['cases'])} test(s) to {stage['detail']}")
+
         with _Stage(run, "build") as stage:
             built_image = True
             await asyncio.to_thread(deployer.build, source_dir, tag, run["id"], log)
@@ -89,7 +99,7 @@ async def run_pipeline(run: dict[str, Any], plan: dict[str, Any], project: dict[
 
         with _Stage(run, "test") as stage:
             log(f"Running {run['total_tests']} test case(s) against {base_url}")
-            await execute_plan(plan, base_url, run)
+            await run_suite(run["suite"], run["cases"], base_url, run, log)
             passed = sum(1 for r in run["results"] if r.get("status") == "passed")
             stage["detail"] = f"{passed}/{len(run['results'])} passed"
             log(stage["detail"])
@@ -98,7 +108,7 @@ async def run_pipeline(run: dict[str, Any], plan: dict[str, Any], project: dict[
         run["error"] = str(exc)
         log(f"ERROR: {exc}")
         for stage in run["stages"]:
-            if stage["status"] == "pending" and stage["key"] in ("prepare", "build", "start", "test"):
+            if stage["status"] == "pending" and stage["key"] in ("prepare", "generate", "build", "start", "test"):
                 stage["status"] = "skipped"
 
     results = run["results"]
@@ -119,13 +129,22 @@ async def run_pipeline(run: dict[str, Any], plan: dict[str, Any], project: dict[
             log(stage["detail"])
 
     run["completed_at"] = utc_now()
+    workbook = export_results(run["cases"], run["results"], run["target"]["name"])
+    suite_zip: Path | None = None
     with _Stage(run, "report") as stage:
         run["report_url"] = render_report(run | {"status": run["outcome"]})
         stage["detail"] = "HTML report ready"
+        if run["suite"].get("dir"):
+            # Keep the evidence next to the scripts, then zip the folder for download and email.
+            results_dir = Path(run["suite"]["dir"]) / "results"
+            (results_dir / "nexus_report.html").write_bytes((REPORT_DIR / f"{run['id']}.html").read_bytes())
+            (results_dir / "nexus_results.xlsx").write_bytes(workbook)
+            suite_zip = await asyncio.to_thread(generator.zip_suite, run["suite"])
+            run["suite"]["zip"] = str(suite_zip)
+            stage["detail"] = f"HTML report and suite archive {suite_zip.name} ready"
 
     with _Stage(run, "email") as stage:
-        workbook = export_results(run["cases"], run["results"], run["target"]["name"])
-        sent, message = await asyncio.to_thread(send_report, run | {"status": run["outcome"]}, to_email, REPORT_DIR / f"{run['id']}.html", workbook)
+        sent, message = await asyncio.to_thread(send_report, run | {"status": run["outcome"]}, to_email, REPORT_DIR / f"{run['id']}.html", workbook, suite_zip)
         run["email"] = {"sent": sent, "message": message, "to": to_email or settings.report_to_email}
         stage["detail"] = message
         if not sent:

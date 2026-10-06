@@ -13,3 +13,5 @@ frontend/pubspec.lock
 data/*
 !data/.gitkeep
 frontend/.flutter-plugins-dependencies
+generated_testsuites/*
+!generated_testsuites/.gitkeep

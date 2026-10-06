@@ -11,6 +11,8 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+      # Generated pytest / Robot Framework suites, one timestamped folder per run.
+      - ./generated_testsuites:/app/generated_testsuites
       # Lets the backend build and run target containers on this machine's Docker.
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped

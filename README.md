@@ -64,17 +64,40 @@ It supports:
      Expected text` are used as is (`samples/project1_testcases.xlsx`); plain-English rows are
      interpreted by GPT (`samples/project2_requirements.xlsx`). NEXUS also suggests test cases
      the sheet is missing.
-3. Review the plan. Every test case has a checkbox: spreadsheet rows start ticked and
+3. Choose the **test framework**: `pytest` (pytest + requests) or `Robot Framework`
+   (RequestsLibrary).
+4. Review the plan. Every test case has a checkbox: spreadsheet rows start ticked and
    suggested additions start unticked, so you choose which to add. Click **Approve N, deploy & run**.
-4. NEXUS builds the repository's `Dockerfile`, starts the container on the `nexus_net`
-   network, waits until it answers HTTP, and runs the selected tests against it. Stages,
-   results and the build log update live.
-5. The target container, its image and the cloned source are then removed; only the NEXUS
+5. NEXUS **generates a real test suite** from the approved test cases, builds the repository's
+   `Dockerfile`, starts the container on the `nexus_net` network, waits until it answers HTTP,
+   and **runs the generated suite** against it with pytest or Robot Framework. Stages, results
+   and the framework's console output update live.
+6. The target container, its image and the cloned source are then removed; only the NEXUS
    backend and frontend stay running.
-6. The HTML report and a results spreadsheet are emailed from `GMAIL_USERNAME` to the address
+7. The HTML report, a results spreadsheet and the test suite (zip) are emailed from `GMAIL_USERNAME` to the address
    you gave (or `REPORT_TO_EMAIL`). The spreadsheet lists every executed case with its result
-   and marks the ones NEXUS added. The Report page has **Download report**, **Download Excel**,
-   **Open report**, **Email again** and **Back to home**.
+   and marks the ones NEXUS added. The Report page has **Download report**, **Download test
+   suite**, **Download Excel**, **Open report**, **Back to home**, a preview of the generated
+   script, and **Email report copy to** for sending a copy to other people.
+
+## Generated test suites
+
+Every run writes its suite to `generated_testsuites/<YYYYMMDD-HHMMSS>_<repo>_<framework>/`
+(timestamps use `NEXUS_TIMEZONE`, default `Asia/Kolkata`):
+
+```
+generated_testsuites/20261006-133535_project1_pytest/
+├── tests/test_project1.py      # one test function per approved case
+├── tests/conftest.py           # streams results to NEXUS while it runs
+├── pytest.ini, requirements.txt, README.md
+├── test_cases.json             # the approved test cases
+└── results/                    # junit.xml (or Robot output.xml, log.html, report.html),
+                                # nexus_report.html, nexus_results.xlsx
+```
+
+The suites are self-contained: start the service yourself and run
+`BASE_URL=http://localhost:8000 pytest -v` (or
+`robot --variable BASE_URL:http://localhost:8000 <repo>.robot`).
 
 ## Requirements for a repository
 
@@ -88,7 +111,9 @@ It supports:
 
 - `frontend/`: Flutter web application (staged flow)
 - `backend/`: FastAPI orchestration service; `deployer.py` builds and runs targets,
-  `pipeline.py` drives each run, `excel.py` reads and writes spreadsheets
+  `pipeline.py` drives each run, `generator.py` writes the pytest / Robot suites,
+  `executor.py` runs them, `excel.py` reads and writes spreadsheets
+- `generated_testsuites/`: the generated pytest / Robot Framework suites (git-ignored)
 - `samples/`: sample scenarios and spreadsheets for Project1 and Project2
 - `data/`: generated reports
 

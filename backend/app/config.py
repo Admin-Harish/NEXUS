@@ -18,6 +18,8 @@ class Settings:
     backend_public_url: str = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000")
     # Docker network shared by the backend and the target containers it deploys.
     docker_network: str = os.getenv("NEXUS_DOCKER_NETWORK", "nexus_net")
+    # Timestamps in generated test suite folder names.
+    timezone: str = os.getenv("NEXUS_TIMEZONE", "Asia/Kolkata")
     deploy_timeout_seconds: int = int(os.getenv("NEXUS_DEPLOY_TIMEOUT_SECONDS", "90"))
     cors_origins: list[str] = None
 

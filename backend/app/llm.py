@@ -19,7 +19,8 @@ Rules:
 - Paths must be concrete (no {placeholders}). When a test needs an existing resource, create it in an earlier test and use the id the documentation says it will receive.
 - Use the exact status codes the documentation or code defines, including for negative tests (validation errors, not found, conflicts).
 - Set expected_contains only to a short string that is certain to appear in the response body (for example a name sent in the payload); otherwise null. Always null for 4xx and 204 responses.
-- payload is a JSON object for POST/PUT/PATCH and null for GET/DELETE."""
+- payload is a JSON object for POST/PUT/PATCH and null for GET/DELETE.
+- Order matters: state carries over between tests. Put every test that relies on a resource (reads, updates, duplicate/conflict checks) before the test that deletes it."""
 
 
 class LLMService:

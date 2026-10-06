@@ -51,6 +51,17 @@
       {% for s in run.stages if s.key not in ('report', 'email') %}<tr><td>{{ s.label }}</td><td class="{{ s.status }}">{{ s.status }}</td><td>{{ s.detail }}</td></tr>{% endfor %}
     </table>
   </div>
+  {% if run.suite and run.suite.name %}
+  <div class="card">
+    <h2>Generated test suite</h2>
+    <dl>
+      <dt>Framework</dt><dd>{{ 'pytest + requests' if run.suite.framework == 'pytest' else 'Robot Framework + RequestsLibrary' }}</dd>
+      <dt>Folder</dt><dd><code>generated_testsuites/{{ run.suite.name }}</code></dd>
+      <dt>Files</dt><dd>{% for f in run.suite.files %}<code>{{ f }}</code> {% endfor %}</dd>
+    </dl>
+    <details open><summary>{{ run.suite.main_file }}</summary><pre style="max-height:480px">{{ run.suite.source }}</pre></details>
+  </div>
+  {% endif %}
   <div class="card">
     <h2>Test results</h2>
     <table><tr><th>#</th><th>Test</th><th>Source</th><th>Request</th><th>Expected</th><th>Actual</th><th>Status</th></tr>

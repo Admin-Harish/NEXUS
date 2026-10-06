@@ -41,6 +41,7 @@ def ingest(request: IngestRequest):
         project = analyze_repo(request.url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    project.framework = request.framework
     if request.scenario.strip():
         project.mode, project.scenario = "scenario", request.scenario.strip()
     projects[project.id] = project.model_dump()
@@ -48,7 +49,7 @@ def ingest(request: IngestRequest):
 
 
 @app.post("/api/projects/ingest-excel", response_model=ProjectSpec)
-async def ingest_excel(url: str = Form(...), file: UploadFile = File(...)):
+async def ingest_excel(url: str = Form(...), file: UploadFile = File(...), framework: Framework = Form("pytest")):
     """Analyze a repository and attach the user's spreadsheet of test cases to run against it."""
     try:
         columns, rows = read_rows(file.filename or "", await file.read())
@@ -56,6 +57,7 @@ async def ingest_excel(url: str = Form(...), file: UploadFile = File(...)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     project.mode, project.excel_filename, project.excel_columns, project.excel_rows = "excel", file.filename, columns, rows
+    project.framework = framework
     project.evidence.append(f"{len(rows)} test case row(s) read from {file.filename}")
     projects[project.id] = project.model_dump()
     return project
@@ -133,9 +135,20 @@ def email_run(run_id: str, request: EmailRequest):
     run = runs.get(run_id)
     if not run: raise HTTPException(404, "Run not found")
     workbook = export_results(run.get("cases", []), run["results"], run["target"].get("name", "run"))
-    sent, message = send_report(run, request.to_email, REPORT_DIR / f"{run_id}.html", workbook)
-    run["email"] = {"sent": sent, "message": message, "to": request.to_email or settings.report_to_email}
+    suite_zip = Path(run["suite"]["zip"]) if run.get("suite", {}).get("zip") else None
+    sent, message = send_report(run, request.to_email, REPORT_DIR / f"{run_id}.html", workbook, suite_zip)
+    if sent:
+        run.setdefault("copies", []).append(request.to_email or settings.report_to_email)
     return {"sent": sent, "message": message}
+
+
+@app.get("/api/runs/{run_id}/testsuite")
+def download_testsuite(run_id: str):
+    """The generated pytest / Robot Framework suite, with the results of this run, as a zip."""
+    run = runs.get(run_id)
+    if not run or not run.get("suite", {}).get("zip"): raise HTTPException(404, "Test suite not available")
+    path = Path(run["suite"]["zip"])
+    return FileResponse(path, media_type="application/zip", filename=path.name)
 
 
 @app.get("/api/runs/{run_id}/excel")
