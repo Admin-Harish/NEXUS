@@ -17,7 +17,23 @@ def _slug(text: str, limit: int = 40) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(text).lower()).strip("_")[:limit] or "case"
 
 
+def check_suite_root() -> str | None:
+    """Return a problem description when generated suites cannot be written, else None."""
+    try:
+        SUITE_ROOT.mkdir(parents=True, exist_ok=True)
+        probe = SUITE_ROOT / ".nexus-write-check"
+        probe.write_text("ok")
+        probe.unlink()
+        return None
+    except OSError as exc:
+        return (f"Cannot write to {settings.host_suites_dir} ({exc.strerror or exc}). The folder was probably deleted "
+                "while NEXUS was running: recreate it, then run `docker compose up -d --force-recreate backend`.")
+
+
 def suite_dir(repo_name: str, framework: str) -> Path:
+    problem = check_suite_root()
+    if problem:
+        raise RuntimeError(problem)
     stamp = datetime.now(ZoneInfo(settings.timezone)).strftime("%Y%m%d-%H%M%S")
     path = SUITE_ROOT / f"{stamp}_{_slug(repo_name, 30)}_{framework}"
     path.mkdir(parents=True, exist_ok=False)
@@ -230,6 +246,7 @@ def write_suite(cases: list[dict[str, Any]], framework: str, repo: str, source: 
     ), encoding="utf-8")
     (path / "results").mkdir()
     return {"framework": framework, "dir": str(path), "name": path.name, "main_file": files[0],
+            "host_dir": f"{settings.host_suites_dir.rstrip('/')}/{path.name}",
             "files": files + ["test_cases.json", "README.md"]}
 
 

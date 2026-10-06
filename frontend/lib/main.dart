@@ -858,7 +858,7 @@ class _NexusHomeState extends State<NexusHome> {
           childrenPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
           leading: Icon(robot ? Icons.smart_toy_outlined : Icons.code, color: brand),
           title: Text('Generated ${robot ? 'Robot Framework' : 'pytest'} suite', style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: SelectableText('generated_testsuites/${suite['name']}', style: TextStyle(fontFamily: 'monospace', fontSize: 12.5, color: Colors.grey.shade700)),
+          subtitle: SelectableText('${suite['host_dir'] ?? 'generated_testsuites/${suite['name']}'}', style: TextStyle(fontFamily: 'monospace', fontSize: 12.5, color: Colors.grey.shade700)),
           children: [
             Align(
               alignment: Alignment.centerLeft,

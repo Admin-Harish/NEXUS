@@ -7,6 +7,9 @@ services:
       dockerfile: backend/Dockerfile
     env_file:
       - .env
+    environment:
+      # Lets NEXUS show where suites land on this machine (the folder is mounted below).
+      NEXUS_HOST_SUITES_DIR: ${PWD}/generated_testsuites
     ports:
       - "8000:8000"
     volumes:

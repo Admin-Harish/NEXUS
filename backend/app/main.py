@@ -12,7 +12,7 @@ from .excel import export_results, read_rows
 from .report import REPORT_DIR
 from .emailer import send_report
 from .pipeline import new_run, run_pipeline
-from . import deployer
+from . import deployer, generator
 import asyncio
 
 app = FastAPI(title="NEXUS", version="0.3.0", description="Adapter-based E2E test planning, deployment and execution")
@@ -22,6 +22,9 @@ background_tasks: set[asyncio.Task] = set()
 @app.on_event("startup")
 async def remove_leftover_targets():
     await asyncio.to_thread(deployer.cleanup_leftovers)
+    problem = generator.check_suite_root()
+    if problem:
+        print(f"WARNING: {problem}", flush=True)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -31,7 +34,9 @@ def utc_now():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "nexus-backend"}
+    problem = generator.check_suite_root()
+    return {"status": "degraded" if problem else "ok", "service": "nexus-backend", "suites_dir": settings.host_suites_dir,
+            **({"problem": problem} if problem else {})}
 
 
 @app.post("/api/projects/ingest", response_model=ProjectSpec)

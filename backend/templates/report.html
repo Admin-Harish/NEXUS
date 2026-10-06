@@ -56,7 +56,7 @@
     <h2>Generated test suite</h2>
     <dl>
       <dt>Framework</dt><dd>{{ 'pytest + requests' if run.suite.framework == 'pytest' else 'Robot Framework + RequestsLibrary' }}</dd>
-      <dt>Folder</dt><dd><code>generated_testsuites/{{ run.suite.name }}</code></dd>
+      <dt>Folder</dt><dd><code>{{ run.suite.host_dir or ("generated_testsuites/" ~ run.suite.name) }}</code></dd>
       <dt>Files</dt><dd>{% for f in run.suite.files %}<code>{{ f }}</code> {% endfor %}</dd>
     </dl>
     <details open><summary>{{ run.suite.main_file }}</summary><pre style="max-height:480px">{{ run.suite.source }}</pre></details>

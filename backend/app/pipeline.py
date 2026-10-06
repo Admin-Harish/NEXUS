@@ -81,7 +81,7 @@ async def run_pipeline(run: dict[str, Any], plan: dict[str, Any], project: dict[
                 generator.write_suite, run["cases"], run["framework"], run["target"]["name"],
                 project["repo_url"], run["target"]["commit"], port)
             run["suite"]["source"] = generator.read_source(run["suite"])
-            stage["detail"] = f"generated_testsuites/{run['suite']['name']}/{run['suite']['main_file']}"
+            stage["detail"] = f"{run['suite']['host_dir']}/{run['suite']['main_file']}"
             log(f"Wrote {run['framework']} suite with {len(run['cases'])} test(s) to {stage['detail']}")
 
         with _Stage(run, "build") as stage:
